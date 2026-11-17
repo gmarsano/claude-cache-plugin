@@ -162,18 +162,28 @@ const label = (state: CacheWindow): string | undefined =>
   state.kind === 'warm' ? `${state.minutesLeft}m` : undefined
 
 // $.fs.read refuses files over 4 MiB, and long sessions pass that: then only
-// the transcript's last bytes are read, which hold the latest response. A line
-// cut at the start fails to parse and is skipped.
+// the transcript's last part is read, which holds the latest response, with
+// the system's own tool (PowerShell on Windows, tail elsewhere). A line cut at
+// the start fails to parse and is skipped.
 const TAIL_BYTES = 3000000
+const TAIL_LINES = 2000
 
-async function readTail($: EngineInterface, path: string): Promise<string> {
+const isWindows = async ($: EngineInterface): Promise<boolean> =>
+  (await $.env.get('OS')) === 'Windows_NT'
+
+async function readTail($: EngineInterface, path: string, windows: boolean): Promise<string> {
   const info = await $.fs.stat(path)
   if (info.size < TAIL_BYTES) {
     return $.fs.read(path)
   }
-  const { exitCode, stdout } = await $.process.run(['tail', '-c', String(TAIL_BYTES), path])
+  const quoted = path.replace(/'/g, "''")
+  const argv = windows
+    ? ['powershell', '-NoProfile', '-NonInteractive', '-Command',
+        `[Console]::OutputEncoding = [Text.Encoding]::UTF8; Get-Content -Encoding UTF8 -Tail ${TAIL_LINES} -LiteralPath '${quoted}'`]
+    : ['tail', '-c', String(TAIL_BYTES), path]
+  const { exitCode, stdout } = await $.process.run(argv)
   if (exitCode !== 0) {
-    throw new Error('tail failed')
+    throw new Error('reading the transcript tail failed')
   }
 
   return stdout
@@ -181,11 +191,12 @@ async function readTail($: EngineInterface, path: string): Promise<string> {
 
 async function refresh($: EngineInterface): Promise<void> {
   try {
-    const home = await $.env.get('HOME')
+    const windows = await isWindows($)
+    const home = windows ? await $.env.get('USERPROFILE') : await $.env.get('HOME')
     const cwd = await $.session.cwd()
     const id = await $.session.id()
     const folder = cwd.replace(/[^A-Za-z0-9]/g, '-')
-    const text = await readTail($, `${home}/.claude/projects/${folder}/${id}.jsonl`)
+    const text = await readTail($, `${home}/.claude/projects/${folder}/${id}.jsonl`, windows)
     const next = replay(text)
     await update($, record, () => next)
   } catch {
