@@ -1,5 +1,7 @@
 # cache
 
+<img src="assets/icon.png" alt="" width="96">
+
 A Claude Code plugin that shows how long the prompt cache of the current session stays warm, on the status line above the prompt:
 
 ```
