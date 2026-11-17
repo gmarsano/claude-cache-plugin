@@ -199,6 +199,7 @@ async function refresh($: EngineInterface): Promise<void> {
     const text = await readTail($, `${home}/.claude/projects/${folder}/${id}.jsonl`, windows)
     const next = replay(text)
     await update($, record, () => next)
+    await $.store.set(`record:${id}`, next)
   } catch {
     // No transcript yet: the indicator stays hidden.
   }
@@ -221,14 +222,23 @@ let isActive = false
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    // Let the session start first: nothing here holds it up.
+    const started = await next(e)
     isActive = (await $.env.get('CLAUDE_CODE_ENTRYPOINT')) !== 'claude-vscode'
     if (!isActive) {
       $.ui.status(undefined)
 
-      return next(e)
+      return started
     }
-    await refresh($)
-    await showStatus($)
+    // Draw at once from what this session's last run saw, then read the
+    // transcript; a stored value from an older shape is ignored.
+    const stored = await $.store.get(`record:${await $.session.id()}`)
+    if (stored !== undefined && stored !== null && typeof stored === 'object' && 'anchorAt' in stored) {
+      const saved = stored as CacheRecord
+      await update($, record, () => saved)
+      await showStatus($)
+    }
+    void refresh($).then(() => showStatus($))
     let ticks = 0
     $.clock.every(15000, async () => {
       ticks += 1
@@ -238,7 +248,7 @@ export const register: Register = on => {
       await showStatus($)
     })
 
-    return next(e)
+    return started
   })
 
   on('turn.complete', async ($, e, next) => {
