@@ -161,13 +161,31 @@ const windowOf = (state: CacheRecord | null, at: number): CacheWindow => {
 const label = (state: CacheWindow): string | undefined =>
   state.kind === 'warm' ? `${state.minutesLeft}m` : undefined
 
+// $.fs.read refuses files over 4 MiB, and long sessions pass that: then only
+// the transcript's last bytes are read, which hold the latest response. A line
+// cut at the start fails to parse and is skipped.
+const TAIL_BYTES = 3000000
+
+async function readTail($: EngineInterface, path: string): Promise<string> {
+  const info = await $.fs.stat(path)
+  if (info.size < TAIL_BYTES) {
+    return $.fs.read(path)
+  }
+  const { exitCode, stdout } = await $.process.run(['tail', '-c', String(TAIL_BYTES), path])
+  if (exitCode !== 0) {
+    throw new Error('tail failed')
+  }
+
+  return stdout
+}
+
 async function refresh($: EngineInterface): Promise<void> {
   try {
     const home = await $.env.get('HOME')
     const cwd = await $.session.cwd()
     const id = await $.session.id()
     const folder = cwd.replace(/[^A-Za-z0-9]/g, '-')
-    const text = await $.fs.read(`${home}/.claude/projects/${folder}/${id}.jsonl`)
+    const text = await readTail($, `${home}/.claude/projects/${folder}/${id}.jsonl`)
     const next = replay(text)
     await update($, record, () => next)
   } catch {
