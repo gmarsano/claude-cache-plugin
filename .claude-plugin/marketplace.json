@@ -1,0 +1,11 @@
+{
+  "name": "claude-cache-plugin",
+  "owner": { "name": "gmarsano" },
+  "plugins": [
+    {
+      "name": "cache",
+      "source": "./",
+      "description": "Prompt cache time left on the Claude Code status line."
+    }
+  ]
+}
